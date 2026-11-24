@@ -4,6 +4,8 @@ import com.bankflow.account.dto.AccountResponse;
 import com.bankflow.account.dto.AccountTransactionResponse;
 import com.bankflow.account.dto.BalanceResponse;
 import com.bankflow.account.dto.CreateAccountRequest;
+import com.bankflow.account.dto.TransferRequest;
+import com.bankflow.account.dto.TransferResponse;
 import com.bankflow.account.entity.Account;
 import com.bankflow.account.entity.AccountTransaction;
 import com.bankflow.account.exception.AccountNotFoundException;
@@ -167,6 +169,76 @@ public class AccountServiceImpl implements AccountService {
                 saved.getCurrency(),
                 saved.getBalance(),
                 saved.getUpdatedAt()
+        );
+    }
+
+    @Override
+    @Transactional
+    public TransferResponse transfer(TransferRequest request) {
+        if (request.fromAccountId() == null || request.toAccountId() == null) {
+            throw new InvalidOperationException("Source and destination accounts must be provided");
+        }
+        if (request.fromAccountId().trim().equalsIgnoreCase(request.toAccountId().trim())) {
+            throw new InvalidOperationException("Source and destination accounts cannot be the same");
+        }
+        if (request.amount() == null || request.amount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new InvalidOperationException("Transfer amount must be greater than zero");
+        }
+
+        Account fromAccount;
+        Account toAccount;
+        if (request.fromAccountId().compareTo(request.toAccountId()) < 0) {
+            fromAccount = findAccountForUpdate(request.fromAccountId());
+            toAccount = findAccountForUpdate(request.toAccountId());
+        } else {
+            toAccount = findAccountForUpdate(request.toAccountId());
+            fromAccount = findAccountForUpdate(request.fromAccountId());
+        }
+
+        if (!"ACTIVE".equalsIgnoreCase(fromAccount.getStatus())) {
+            throw new InvalidOperationException("Sender account is not active: " + fromAccount.getId());
+        }
+        if (!"ACTIVE".equalsIgnoreCase(toAccount.getStatus())) {
+            throw new InvalidOperationException("Recipient account is not active: " + toAccount.getId());
+        }
+
+        BigDecimal senderBalance = fromAccount.getBalance();
+        if (senderBalance.compareTo(request.amount()) < 0) {
+            throw new InsufficientBalanceException(
+                    "Insufficient balance in account " + fromAccount.getId() +
+                    ". Current balance: " + senderBalance + ", transfer requested: " + request.amount()
+            );
+        }
+
+        BigDecimal senderNewBalance = senderBalance.subtract(request.amount());
+        BigDecimal recipientPreviousBalance = toAccount.getBalance();
+        BigDecimal recipientNewBalance = recipientPreviousBalance.add(request.amount());
+
+        fromAccount.setBalance(senderNewBalance);
+        toAccount.setBalance(recipientNewBalance);
+
+        accountRepository.save(fromAccount);
+        accountRepository.save(toAccount);
+
+        String txnId = "txn-" + UUID.randomUUID().toString().substring(0, 8);
+        String desc = request.description() != null && !request.description().isBlank()
+                ? request.description()
+                : "Transfer from " + fromAccount.getAccountNumber() + " to " + toAccount.getAccountNumber();
+
+        recordLedgerEntry(txnId, fromAccount.getId(), request.amount(), "DEBIT", desc, toAccount.getId(), senderNewBalance);
+        recordLedgerEntry(txnId, toAccount.getId(), request.amount(), "CREDIT", desc, fromAccount.getId(), recipientNewBalance);
+
+        publishBalanceUpdated(fromAccount, senderBalance, senderNewBalance, request.amount(), "DEBIT", txnId, toAccount.getId());
+        publishBalanceUpdated(toAccount, recipientPreviousBalance, recipientNewBalance, request.amount(), "CREDIT", txnId, fromAccount.getId());
+
+        return new TransferResponse(
+                txnId,
+                fromAccount.getId(),
+                toAccount.getId(),
+                request.amount(),
+                senderNewBalance,
+                "COMPLETED",
+                Instant.now()
         );
     }
 

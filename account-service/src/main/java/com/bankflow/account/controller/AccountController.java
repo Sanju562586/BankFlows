@@ -4,6 +4,8 @@ import com.bankflow.account.dto.AccountResponse;
 import com.bankflow.account.dto.AccountTransactionResponse;
 import com.bankflow.account.dto.BalanceResponse;
 import com.bankflow.account.dto.CreateAccountRequest;
+import com.bankflow.account.dto.TransferRequest;
+import com.bankflow.account.dto.TransferResponse;
 import com.bankflow.account.service.AccountService;
 import com.bankflow.common.dto.BalanceOperationRequest;
 import jakarta.validation.Valid;
@@ -55,6 +57,11 @@ public class AccountController {
             @Valid @RequestBody BalanceOperationRequest request
     ) {
         return ResponseEntity.ok(accountService.updateBalance(id, request));
+    }
+
+    @PostMapping("/transfer")
+    public ResponseEntity<TransferResponse> transfer(@Valid @RequestBody TransferRequest request) {
+        return ResponseEntity.ok(accountService.transfer(request));
     }
 
     @GetMapping("/{id}/transactions")
