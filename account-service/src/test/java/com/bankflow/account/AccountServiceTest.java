@@ -11,6 +11,8 @@ import static org.mockito.Mockito.when;
 import com.bankflow.account.dto.AccountResponse;
 import com.bankflow.account.dto.BalanceResponse;
 import com.bankflow.account.dto.CreateAccountRequest;
+import com.bankflow.account.dto.TransferRequest;
+import com.bankflow.account.dto.TransferResponse;
 import com.bankflow.account.entity.Account;
 import com.bankflow.account.exception.InsufficientBalanceException;
 import com.bankflow.account.repository.AccountRepository;
@@ -141,5 +143,58 @@ class AccountServiceTest {
 
         assertEquals(10, successCount.get());
         assertEquals(0, sharedAccount.getBalance().compareTo(BigDecimal.ZERO));
+    }
+
+    @Test
+    void transfer_shouldDebitSenderAndCreditRecipient() {
+        Account sender = new Account();
+        sender.setId("acc-1");
+        sender.setAccountNumber("1111111111");
+        sender.setBalance(new BigDecimal("1000.00"));
+        sender.setStatus("ACTIVE");
+
+        Account recipient = new Account();
+        recipient.setId("acc-2");
+        recipient.setAccountNumber("2222222222");
+        recipient.setBalance(new BigDecimal("500.00"));
+        recipient.setStatus("ACTIVE");
+
+        when(accountRepository.findByIdForUpdate("acc-1")).thenReturn(Optional.of(sender));
+        when(accountRepository.findByIdForUpdate("acc-2")).thenReturn(Optional.of(recipient));
+
+        TransferRequest request = new TransferRequest("acc-1", "acc-2", new BigDecimal("300.00"), "Lunch payment");
+        TransferResponse response = accountService.transfer(request);
+
+        assertEquals("COMPLETED", response.status());
+        assertEquals(new BigDecimal("700.00"), sender.getBalance());
+        assertEquals(new BigDecimal("800.00"), recipient.getBalance());
+        assertEquals(new BigDecimal("700.00"), response.senderBalanceAfter());
+    }
+
+    @Test
+    void transfer_withInsufficientBalance_shouldThrowInsufficientBalanceException() {
+        Account sender = new Account();
+        sender.setId("acc-1");
+        sender.setAccountNumber("1111111111");
+        sender.setBalance(new BigDecimal("100.00"));
+        sender.setStatus("ACTIVE");
+
+        Account recipient = new Account();
+        recipient.setId("acc-2");
+        recipient.setAccountNumber("2222222222");
+        recipient.setBalance(new BigDecimal("500.00"));
+        recipient.setStatus("ACTIVE");
+
+        when(accountRepository.findByIdForUpdate("acc-1")).thenReturn(Optional.of(sender));
+        when(accountRepository.findByIdForUpdate("acc-2")).thenReturn(Optional.of(recipient));
+
+        TransferRequest request = new TransferRequest("acc-1", "acc-2", new BigDecimal("500.00"), "Rent");
+
+        assertThrows(
+                InsufficientBalanceException.class,
+                () -> accountService.transfer(request)
+        );
+        assertEquals(new BigDecimal("100.00"), sender.getBalance());
+        assertEquals(new BigDecimal("500.00"), recipient.getBalance());
     }
 }
